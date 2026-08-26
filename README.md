@@ -18,14 +18,51 @@ Pacchetto YAML completo per gestire l'irrigazione automatica dell'orto su **Home
 
 ## 📋 Prerequisiti
 
-1. **Integrazione Telegram configurata:** Bot Telegram attivo con gestione dei callback query.
-2. **Account OpenWeatherMap:** Chiave API valida con accesso a **One Call API 3.0**.
-3. **Abilitazione Packages su Home Assistant:** Assicurati che nel tuo file `configuration.yaml` sia abilitata la cartella `packages`:
+### 1. Abilitazione Packages su Home Assistant
+Assicurati che nel tuo file `configuration.yaml` sia abilitata la gestione dei packages:
 
 ```yaml
 homeassistant:
   packages: !include_dir_named packages
 ```
+
+---
+
+### 2. Configurazione Bot Telegram & Notifiche
+Per consentire a Home Assistant di inviare notifiche e ricevere i comandi dei pulsanti inline (`/irrigazione_orto_si`, `/irrigazione_orto_no`), è necessario un Bot Telegram configurato:
+
+#### A. Creazione del Bot Telegram
+1. Apri Telegram e cerca **`@BotFather`** (l'account ufficiale con la spunta blu).
+2. Invia il comando `/newbot`.
+3. Scegli un **nome** per il bot (es. *Home Assistant Orto*) e uno **username** che deve terminare per `bot` (es. *mio_orto_ha_bot*).
+4. BotFather ti fornirà un **API Token HTTP** (es. `123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ`).
+
+#### B. Recupero del Chat ID
+1. Cerca su Telegram il bot **`@userinfobot`** (o **`@IDBot`**) e invia `/start`.
+2. Annota il valore numerico indicato come **`Id`** (es. `987654321`).
+3. Apri la chat con il bot creato al punto precedente e premi **Avvia** (`/start`) per abilitarlo all'invio di messaggi verso di te.
+
+#### C. Integrazione in `configuration.yaml`
+Aggiungi o verifica la configurazione dell'integrazione Telegram nel tuo `configuration.yaml`:
+
+```yaml
+telegram_bot:
+  - platform: polling
+    api_key: !secret telegram_bot_api_key
+    allowed_chat_ids:
+      - !secret telegram_chat_ids_orto
+
+notify:
+  - platform: telegram
+    name: "telegram_bot"
+    chat_id: !secret telegram_chat_ids_orto
+```
+
+---
+
+### 3. Account OpenWeatherMap
+1. Registrati su [OpenWeatherMap](https://openweathermap.org/).
+2. Genera una chiave API e assicurati di avere accesso al piano **One Call API 3.0** (i primi 1.000 chiamate/giorno sono gratuite).
 
 ---
 
@@ -36,21 +73,22 @@ homeassistant:
 
 ```yaml
 owm_api_key_orto: "TUA_CHIAVE_API_OPENWEATHERMAP"
-telegram_chat_ids_orto: "TUO_CHAT_ID_TELEGRAM" # oppure [12345678, 87654321]
+telegram_bot_api_key: "IL_TUO_TOKEN_BOTFATHER"
+telegram_chat_ids_orto: 987654321 # Oppure lista: [12345678, 87654321]
 ```
 
 3. **Personalizzazioni nel file `irrigazione_orto.yaml`:**
-   * **Coordinate:** Inserisci latitudine (`lat`) e longitudine (`lon`) del tuo orto nei parametri REST.
-   * **Entità Switch:** Modifica `switch.irrigazione_orto` con il nome reale della tua elettrovalvola/interruttore.
-   * **Orario di avvio:** Di default parte al tramonto (`sunset`). Puoi aggiungere un `offset` (es. `"-01:00:00"` per anticipare di un'ora).
-   * **Durata:** Di default è impostata su 30 minuti (`00:30:00`).
+   * **Coordinate:** Inserisci latitudine (`lat`) e longitudine (`lon`) del tuo orto nei parametri del sensore REST.
+   * **Entità Switch:** Modifica `switch.irrigazione_orto` con l'ID reale della tua elettrovalvola o relè.
+   * **Orario di avvio:** Di default scatta al tramonto (`sunset`). Puoi impostare un `offset` (es. `"-01:00:00"` per anticipare di un'ora).
+   * **Durata irrigazione:** Di default impostata su 30 minuti (`00:30:00`).
 
-4. Riavvia Home Assistant o ricarica le entità e le automazioni da **Strumenti per gli sviluppatori**.
+4. Ricarica la configurazione YAML da **Strumenti per gli sviluppatori > YAML** oppure riavvia Home Assistant.
 
 ---
 
 ## 📱 Controlli Telegram Supportati
 
-Il bot invia messaggi interattivi con tastiera inline:
+Il bot invia notifiche interattive con pulsanti inline:
 * `✅ Accendi`: Forza l'irrigazione manuale quando viene saltata per pioggia.
-* `❌ Spegni`: Interrompe l'irrigazione avviata automaticamente.
+* `❌ Spegni`: Interrompe immediatamente l'irrigazione in corso.
