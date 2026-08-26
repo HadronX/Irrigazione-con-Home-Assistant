@@ -42,21 +42,11 @@ Per consentire a Home Assistant di inviare notifiche e ricevere i comandi dei pu
 2. Annota il valore numerico indicato come **`Id`** (es. `987654321`).
 3. Apri la chat con il bot creato al punto precedente e premi **Avvia** (`/start`) per abilitarlo all'invio di messaggi verso di te.
 
-#### C. Integrazione in `configuration.yaml`
-Aggiungi o verifica la configurazione dell'integrazione Telegram nel tuo `configuration.yaml`:
+#### C. Installa l'integrazione Telegram Bot
+Aggiungi  la configurazione dell'integrazione Telegram:
+Aggiungi servizio -> selezionare come piattaforma "Sondaggio", ed inserire la chiave API del bot del punto precedente.
 
-```yaml
-telegram_bot:
-  - platform: polling
-    api_key: !secret telegram_bot_api_key
-    allowed_chat_ids:
-      - !secret telegram_chat_ids_orto
-
-notify:
-  - platform: telegram
-    name: "telegram_bot"
-    chat_id: !secret telegram_chat_ids_orto
-```
+Abilitare il proprio chat_id (lo stesso presente nel file secret.yml) a ricevere i messaggi dal bot aggiungendo dall'apposito bottone "aggiungi id chat consentito"
 
 ---
 
