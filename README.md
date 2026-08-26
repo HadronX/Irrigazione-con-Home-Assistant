@@ -31,19 +31,19 @@ homeassistant:
 
 ## ⚙️ Installazione e Configurazione
 
-1. Salva il file come 'irrigazione_orto.yaml' all'interno della cartella '/config/packages/'.
-2. Aggiungi i seguenti segreti al tuo file 'secrets.yaml':
+1. Salva il file come `irrigazione_orto.yaml` all'interno della cartella `/config/packages/`.
+2. Aggiungi i seguenti segreti al tuo file `secrets.yaml`:
 
-
+```yaml
 owm_api_key_orto: "TUA_CHIAVE_API_OPENWEATHERMAP"
 telegram_chat_ids_orto: "TUO_CHAT_ID_TELEGRAM" # oppure [12345678, 87654321]
+```
 
-
-3. **Personalizzazioni nel file 'irrigazione_orto.yaml':**
-   * **Coordinate:** Inserisci latitudine ('lat') e longitudine ('lon') del tuo orto nei parametri REST.
-   * **Entità Switch:** Modifica 'switch.irrigazione_orto' con il nome reale della tua elettrovalvola/interruttore.
-   * **Orario di avvio:** Di default parte al tramonto ('sunset'). Puoi aggiungere un 'offset' (es. '"-01:00:00"' per anticipare di un'ora).
-   * **Durata:** Di default è impostata su 30 minuti ('00:30:00').
+3. **Personalizzazioni nel file `irrigazione_orto.yaml`:**
+   * **Coordinate:** Inserisci latitudine (`lat`) e longitudine (`lon`) del tuo orto nei parametri REST.
+   * **Entità Switch:** Modifica `switch.irrigazione_orto` con il nome reale della tua elettrovalvola/interruttore.
+   * **Orario di avvio:** Di default parte al tramonto (`sunset`). Puoi aggiungere un `offset` (es. `"-01:00:00"` per anticipare di un'ora).
+   * **Durata:** Di default è impostata su 30 minuti (`00:30:00`).
 
 4. Riavvia Home Assistant o ricarica le entità e le automazioni da **Strumenti per gli sviluppatori**.
 
