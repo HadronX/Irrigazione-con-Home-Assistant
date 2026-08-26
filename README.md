@@ -31,7 +31,7 @@ homeassistant:
 
 ## ⚙️ Installazione e Configurazione
 
-1. Salva il file come `irrigazione_orto.yaml` all'interno della cartella `/config/packages/`.
+1. Salva il file come `irrigazione_orto.yaml` all'interno della cartella `/homeassistant/packages/`.
 2. Aggiungi i seguenti segreti al tuo file `secrets.yaml`:
 
 ```yaml
