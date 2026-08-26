@@ -1,0 +1,270 @@
+# /homeassistant/packages/irrigazione_orto.yaml
+# ==========================================================================
+# AUTOMAZIONE IRRIGAZIONE ORTO - Home Assistant  (v2 - FIX)
+# ==========================================================================
+#
+# COSA FA (invariato rispetto alla v1):
+# 1. Ogni ora legge da OpenWeatherMap (One Call API 3.0):
+#    - quanta pioggia è caduta nell'ultima ora
+#    - quanta pioggia è prevista nelle prossime 4 ore
+# 2. Mantiene uno storico delle ultime 10 letture orarie (= ultime 10 ore)
+# 3. Al tramonto valuta i dati raccolti e decide se irrigare.
+# 4. Invia messaggio Telegram con bottone per forzare manualmente.
+#
+# ==========================================================================
+# PRIMA DI USARLO, SOSTITUISCI QUESTI VALORI (come nella v1):
+# ==========================================================================
+# - lat/lon del sensore REST (già impostati con le tue coordinate orto) righe 59 e 60
+# - l'evento scatta sempre al tramonto. Inoltre può essere modificato l'offeset per far partire l'irrigazione un'ora prima es. offset: "-01:00:00" o mezz'ora dopo es. offset: "00:30:00" riga 134
+# - L'irrigazione dura 30 minuti. Per modificare editare la riga 258
+# - secrets.yaml -> owm_api_key_orto, telegram_chat_ids_orto
+# - switch.irrigazione_orto -> verifica sia l'entity_id reale o eventualmente sostituirla con l'entità che attività o apre l'irrigazione
+# - Aggiungi in Telegram Bot gli id abilitati a ricevere le notifiche
+# ==========================================================================
+# --------------------------------------------------------------------
+# 1) HELPER: buffer storico pioggia + sensori numerici derivati
+#    + soglia configurabile (NUOVO)
+# --------------------------------------------------------------------
+input_text:
+  rain_buffer_orto:
+    name: "Storico pioggia oraria (orto)"
+    max: 255
+    initial: "[]"
+
+input_number:
+  rain_last_10h_orto:
+    name: "Pioggia ultime 10 ore (orto)"
+    min: 0
+    max: 500
+    step: 0.1
+    unit_of_measurement: "mm"
+
+  # NUOVO: soglia regolabile da UI senza toccare lo YAML
+  soglia_pioggia_orto_mm:
+    name: "Soglia pioggia per saltare irrigazione orto"
+    min: 0
+    max: 20
+    step: 0.5
+    initial: 5
+    unit_of_measurement: "mm"
+
+input_boolean:
+  irrigazione_orto_manuale:
+    name: "Stato manuale irrigazione orto"
+
+# --------------------------------------------------------------------
+# 2) SENSORI REST: dati da OpenWeatherMap One Call API 3.0 (invariato)
+# --------------------------------------------------------------------
+rest:
+  - resource: "https://api.openweathermap.org/data/3.0/onecall"
+    params:
+      lat: "40.6113" # <-- Inserire la posizione di latitudine
+      lon: "15.5308" # <-- Inserire la posizione di longitudine
+      appid: !secret owm_api_key_orto
+      units: "metric"
+      exclude: "minutely,daily,alerts"
+    scan_interval: 3600
+    sensor:
+      - name: "OWM Pioggia Ultima Ora Orto"
+        unique_id: owm_pioggia_ultima_ora_orto
+        unit_of_measurement: "mm"
+        state_class: measurement
+        value_template: >-
+          {{ value_json.current.rain['1h'] | default(0, true) | round(2) }}
+
+      - name: "OWM Pioggia Prossime 4 Ore Orto"
+        unique_id: owm_pioggia_prossime_4h_orto
+        unit_of_measurement: "mm"
+        state_class: measurement
+        value_template: >-
+          {% set ns = namespace(totale=0) %}
+          {% for h in value_json.hourly[:4] %}
+            {% if h.rain is defined and h.rain['1h'] is defined %}
+              {% set ns.totale = ns.totale + h.rain['1h'] %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.totale | round(2) }}
+
+
+# --------------------------------------------------------------------
+# 3) AUTOMAZIONI
+# --------------------------------------------------------------------
+automation:
+
+  # ---- 3.1 Aggiorna lo storico "ultime 10 ore" - FIX: campiona ogni ora
+  #          a orario fisso invece che "a evento" ----
+  - alias: "Orto - Aggiorna storico pioggia 10h"
+    id: orto_aggiorna_storico_pioggia_10h
+    trigger:
+      # FIX: prima era "platform: state" sul sensore OWM, che NON scatta
+      # se il valore resta invariato (es. resta a 0 per ore quando non
+      # piove) -> il buffer si "bloccava" e le vecchie piogge non
+      # uscivano mai dalla finestra delle 10 ore. Ora campioniamo a
+      # orario fisso, una volta ogni ora, sempre.
+      - platform: time_pattern
+        minutes: 5
+    action:
+      - variables:
+          # FIX: leggiamo lo stato attuale del sensore direttamente
+          # (non trigger.to_state, che non esiste con time_pattern)
+          nuovo_valore: "{{ states('sensor.owm_pioggia_ultima_ora_orto') | float(0) }}"
+          storico_attuale: >-
+            {{ (states('input_text.rain_buffer_orto') | from_json)
+               if states('input_text.rain_buffer_orto') not in ['', 'unknown', 'unavailable']
+               else [] }}
+          storico_aggiornato: >-
+            {{ (storico_attuale + [nuovo_valore])[-10:] }}
+      - service: input_text.set_value
+        target:
+          entity_id: input_text.rain_buffer_orto
+        data:
+          value: "{{ storico_aggiornato | to_json }}"
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.rain_last_10h_orto
+        data:
+          value: "{{ storico_aggiornato | sum | round(2) }}"
+    mode: single
+
+  # ---- 3.2 Decide se attivare l'irrigazione e avvisa via Telegram
+  - alias: "Orto - Valuta e attiva irrigazione"
+    id: orto_valuta_attiva_irrigazione
+    trigger:
+      - platform: sun
+        event: sunset
+        offset: "00:00:00"
+    variables:
+      pioggia_10h: "{{ states('input_number.rain_last_10h_orto') | float(0) }}"
+      pioggia_4h: "{{ states('sensor.owm_pioggia_prossime_4h_orto') | float(0) }}"
+      # NUOVO: totale pioggia (passata + prevista) confrontato con la soglia
+      pioggia_totale: "{{ (states('input_number.rain_last_10h_orto') | float(0) + states('sensor.owm_pioggia_prossime_4h_orto') | float(0)) | round(2) }}"
+      soglia: "{{ states('input_number.soglia_pioggia_orto_mm') | float(5) }}"
+    action:
+      - choose:
+          # Pioggia totale sotto soglia -> irrigazione ON
+          - conditions:
+              - condition: template
+                value_template: "{{ pioggia_totale < soglia }}"
+            sequence:
+              - service: switch.turn_on
+                target:
+                  entity_id: switch.irrigazione_orto
+              - service: telegram_bot.send_message
+                data:
+                  chat_id: !secret telegram_chat_ids_orto
+                  message: >-
+                    🌱 Irrigazione orto ATTIVATA.
+                    Pioggia totale (ultime 10h + prossime 4h previste):
+                    {{ pioggia_totale }} mm, sotto la soglia di {{ soglia }} mm.
+
+          # Pioggia totale sopra soglia -> irrigazione NON attivata
+          - conditions:
+              - condition: template
+                value_template: "{{ pioggia_totale >= soglia }}"
+            sequence:
+              - service: telegram_bot.send_message
+                data:
+                  chat_id: !secret telegram_chat_ids_orto
+                  message: >-
+                    🌧️ Irrigazione orto NON attivata.
+                    Pioggia ultime 10h: {{ pioggia_10h }} mm -
+                    Pioggia prevista prossime 4h: {{ pioggia_4h }} mm
+                    (totale {{ pioggia_totale }} mm, soglia {{ soglia }} mm).
+                    L'irrigazione rimane spenta per le previsioni di pioggia.
+
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ pioggia_totale < soglia }}"
+            sequence:
+              - service: telegram_bot.send_message
+                data:
+                  chat_id: !secret telegram_chat_ids_orto
+                  message: >-
+                    Vuoi spegnere manualmente l'irrigazione dell'orto?
+                  inline_keyboard:
+                    - "❌ Spegni:/irrigazione_orto_no"
+
+          - conditions:
+              - condition: template
+                value_template: "{{ pioggia_totale >= soglia }}"
+            sequence:
+              - service: telegram_bot.send_message
+                data:
+                  chat_id: !secret telegram_chat_ids_orto
+                  message: >-
+                    Vuoi forzare manualmente l'irrigazione dell'orto?
+                  inline_keyboard:
+                    - "✅ Accendi:/irrigazione_orto_si"
+    mode: queued
+
+  # ---- 3.3 Gestisce la risposta Sì/No da Telegram (invariata) ----
+  - alias: "Orto - Gestione risposta Telegram irrigazione"
+    id: orto_gestione_risposta_telegram
+    trigger:
+      - platform: event
+        event_type: telegram_callback
+    condition:
+      - condition: template
+        value_template: >-
+          {{ trigger.event.data.data in ['/irrigazione_orto_si', '/irrigazione_orto_no'] }}
+    action:
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.event.data.data == '/irrigazione_orto_si' }}"
+            sequence:
+              - service: switch.turn_on
+                target:
+                  entity_id: switch.irrigazione_orto
+              - service: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.irrigazione_orto_manuale
+              - service: telegram_bot.answer_callback_query
+                data:
+                  callback_query_id: "{{ trigger.event.data.id }}"
+                  message: "Irrigazione orto accesa manualmente ✅"
+              - service: telegram_bot.send_message
+                data:
+                  chat_id: !secret telegram_chat_ids_orto
+                  message: "✅ Irrigazione orto accesa manualmente su tua richiesta."
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.event.data.data == '/irrigazione_orto_no' }}"
+            sequence:
+              - service: switch.turn_off
+                target:
+                  entity_id: switch.irrigazione_orto
+              - service: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.irrigazione_orto_manuale
+              - service: telegram_bot.answer_callback_query
+                data:
+                  callback_query_id: "{{ trigger.event.data.id }}"
+                  message: "Irrigazione orto spenta ❌"
+              - service: telegram_bot.send_message
+                data:
+                  chat_id: !secret telegram_chat_ids_orto
+                  message: "❌ Irrigazione orto spenta manualmente su tua richiesta."
+    mode: queued
+
+  # ---- 3.4 Spegnimento automatico dopo 30 minuti (invariata) ----
+  - alias: "Orto - Spegnimento automatico irrigazione"
+    id: orto_spegnimento_automatico_xxmin
+    trigger:
+      - platform: state
+        entity_id: switch.irrigazione_orto
+        to: "on"
+        for: "00:30:00"
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id: switch.irrigazione_orto
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.irrigazione_orto_manuale
+      - service: telegram_bot.send_message
+        data:
+          chat_id: !secret telegram_chat_ids_orto
+          message: "🛑 Irrigazione orto terminata automaticamente."
+    mode: single
